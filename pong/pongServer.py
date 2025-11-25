@@ -14,7 +14,7 @@ class Server:
     # Purpose:  Initialize the server socket and game state
     # Pre:      Port is available
     # Post:     Server is listening for connections
-    def __init__(self, host: str ='127.0.0.1', port: int =55555) -> None:
+    def __init__(self, host: str ='0.0.0.0', port: int =55555) -> None:
         self.host = host
         self.port = port
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
