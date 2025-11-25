@@ -1,18 +1,20 @@
 # =================================================================================================
 # Contributing Authors:	    Shelby Scoville
 # Email Addresses:          snsc235@uky.edu
-# Date:                     11/19/2025
-# Purpose:                  Server Logic for Pong Game
-# Misc:                     
+# Date:                     11/25/2025
+# Purpose:                  Server Logic for Pong Game                     
 # =================================================================================================
 
 import socket
 import threading
 import json
-import time
 
 class Server:
-    def __init__(self, host='127.0.0.1', port=55555):
+    # Author:   Shelby Scoville
+    # Purpose:  Initialize the server socket and game state
+    # Pre:      Port is available
+    # Post:     Server is listening for connections
+    def __init__(self, host: str ='127.0.0.1', port: int =55555) -> None:
         self.host = host
         self.port = port
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -32,16 +34,25 @@ class Server:
             "score2": 0,
             "sync" : 0
         }
-    def send_data(self, client, data):
+
+    # Author:   Shelby Scoville
+    # Purpose:  Sends JSON data to a specific client
+    # Pre:      Client socket is open
+    # Post:     Data is sent encoded as bytes
+    def send_data(self, client: socket.socket, data: dict) -> bool:
         try:
             message = json.dumps(data) + '\n'
             client.sendall(message.encode('utf-8'))
             return True
         except:
             return False
-               
-    def handle_client(self, client, player_id):
-        buffer = "" # Initialize buffer once per client so it persists
+
+    # Author:   Shelby Scoville
+    # Purpose:  Handles communication loop for a single client (Receives updates, sends state)
+    # Pre:      Client is connected and identified by player_id
+    # Post:     Client loop ends upon disconnection
+    def handle_client(self, client: socket.socket, player_id: int) -> None:
+        buffer = "" 
         while True:
             try:
                 # 1. Receive Data
@@ -89,8 +100,12 @@ class Server:
         
         print(f"Player {player_id} disconnected")
         client.close()      
-
-    def run(self):
+    
+    # Author:   Shelby Scoville
+    # Purpose:  Main server loop to accept incoming connections
+    # Pre:      Server socket is listening
+    # Post:     Accepts 2 clients and starts their threads
+    def run(self) -> None:
         print(f"Server started on {self.host}:{self.port}")
         print("Waiting for 2 players...")
         while len(self.clients) < 2:
@@ -122,10 +137,3 @@ class Server:
 
 if __name__ == "__main__":
     Server().run()
-
-# Use this file to write your server logic
-# You will need to support at least two clients
-# You will need to keep track of where on the screen (x,y coordinates) each paddle is, the score 
-# for each player and where the ball is, and relay that to each client
-# I suggest you use the sync variable in pongClient.py to determine how out of sync your two
-# clients are and take actions to resync the games
