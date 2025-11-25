@@ -10,13 +10,67 @@ import pygame
 import tkinter as tk
 import sys
 import socket
+import json
+import threading
 
 from assets.code.helperCode import *
+
+# Global variable to store received game state
+received_state = None
+state_lock = threading.Lock()
+
+def receive_updates(client):
+    global received_state
+    buffer = ""
+    while True:
+        try: 
+            chunk = client.recv(1024).decode('utf-8')
+            if not chunk: 
+                break
+
+            buffer += chunk
+
+            # process all complete messages in buffer
+            while '\n' in buffer:
+                message, buffer = buffer.split('\n', 1)
+                try:
+                    data = json.loads(message)
+                    with state_lock:
+                        received_state = data
+                except json.JSONDecodeError:
+                    continue
+        except Exception as e:
+            print(f"Error receiving data: {e}")
+            break
+
+def send_update(client, paddle_y, ball_x, ball_y, ball_dx, ball_dy, score1, score2, sync):
+    try:
+        data = {
+            "paddle_y": paddle_y,
+            "ball_x": ball_x,
+            "ball_y": ball_y,
+            "ball_dx": ball_dx,
+            "ball_dy": ball_dy,
+            "score1": score1,
+            "score2": score2,
+            "sync": sync
+        }
+        message = json.dumps(data) + '\n'
+        client.sendall(message.encode('utf-8'))
+        return True
+    except Exception as e:
+        print(f"Error sending data: {e}")
+        return False
 
 # This is the main game loop.  For the most part, you will not need to modify this.  The sections
 # where you should add to the code are marked.  Feel free to change any part of this project
 # to suit your needs.
 def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket) -> None:
+    global received_state
+
+    # Start backgroung thread to receive updates
+    receive_thread = threading.Thread(target=receive_updates, args=(client,), daemon=True)
+    receive_thread.start()
     
     # Pygame inits
     pygame.mixer.pre_init(44100, -16, 2, 2048)
@@ -88,13 +142,43 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # =========================================================================================
 
         # Update the player paddle and opponent paddle's location on the screen
-        for paddle in [playerPaddleObj, opponentPaddleObj]:
-            if paddle.moving == "down":
-                if paddle.rect.bottomleft[1] < screenHeight-10:
-                    paddle.rect.y += paddle.speed
-            elif paddle.moving == "up":
-                if paddle.rect.topleft[1] > 10:
-                    paddle.rect.y -= paddle.speed
+        #for paddle in [playerPaddleObj, opponentPaddleObj]:
+        #    if paddle.moving == "down":
+        #        if paddle.rect.bottomleft[1] < screenHeight-10:
+        #            paddle.rect.y += paddle.speed
+        #   elif paddle.moving == "up":
+        #       if paddle.rect.topleft[1] > 10:
+        #           paddle.rect.y -= paddle.speed
+
+        # Update the player paddle location
+        
+
+        if playerPaddleObj.moving == "down":
+            if playerPaddleObj.rect.bottomLeft[1] < screenHeight-10:
+                  playerPaddleObj.rect.y += playerPaddleObj.speed
+        elif playerPaddleObj.moving == "up":
+            if playerPaddleObj.rect.topleft[1] > 10:
+                playerPaddleObj.rect.y -= playerPaddleObj.speed
+        
+        # Receive updates from server and apply them
+        with state_lock:
+            if received_state is not None:
+                # Update opponent paddle position
+                if playerPaddle == "left":
+                    opponentPaddleObj.rect.y = received_state.get("p2_y", opponentPaddleObj.rect.y)
+                else:
+                    opponentPaddleObj.rect.y = received_state.get("p1_y", opponentPaddleObj.rect.y)
+
+                # If server is ahead or equal in sync, use server's ball position
+                if received_state.get("sync", 0) >= sync:
+                    ball.rect.x = received_state.get("ball_x", ball.rect.x)
+                    ball.rect.y = received_state.get("ball_y", ball.rect.y)
+                    ball.dx = received_state.get("ball_dx", ball.dx)
+                    ball.dy = received_state.get("ball_dy", ball.dy)
+                    lScore = received_state.get("score1", lScore)
+                    rScore = received_state.get("score2", rScore)
+                    sync = received_state.get("sync", sync)
+
 
         # If the game is over, display the win message
         if lScore > 4 or rScore > 4:
@@ -155,7 +239,16 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # =========================================================================================
         # Send your server update here at the end of the game loop to sync your game with your
         # opponent's game
-
+        send_update(
+            client,
+            playerPaddleObj.rect.y,
+            ball.rect.y,
+            ball.dx,
+            ball.dy,
+            lScore,
+            rScore,
+            sync
+        )
         # =========================================================================================
 
 
@@ -175,20 +268,76 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     
     # Create a socket and connect to the server
     # You don't have to use SOCK_STREAM, use what you think is best
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     # Get the required information from your server (screen width, height & player paddle, "left or "right)
 
 
     # If you have messages you'd like to show the user use the errorLabel widget like so
-    errorLabel.config(text=f"Some update text. You input: IP: {ip}, Port: {port}")
+    #errorLabel.config(text=f"Some update text. You input: IP: {ip}, Port: {port}")
     # You may or may not need to call this, depending on how many times you update the label
-    errorLabel.update()     
+    #errorLabel.update()     
 
     # Close this window and start the game with the info passed to you from the server
     #app.withdraw()     # Hides the window (we'll kill it later)
     #playGame(screenWidth, screenHeight, ("left"|"right"), client)  # User will be either left or right paddle
     #app.quit()         # Kills the window
+    try:
+        # Validate inputs
+        if not ip or not port:
+            errorLabel.config(text="Please enter both IP and Port")
+            errorLabel.update()
+            return
+        # Create socket and connect
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.settimeout(5)
+
+        errorLabel.config(text=f"Connecting to {ip}:{port}...")
+        errorLabel.update()
+
+        client.connect((ip, int(port)))
+
+        errorLabel.config(text="Connected! Waiting for game info...")
+        errorLabel.update()
+
+        # Receive initial game configuration from server
+        buffer = ""
+        while '\n' not in buffer:
+            chunk = client.recv(1024).decode('utf-8')
+            if not chunk:
+                raise Exception("Connection closed by server")
+            buffer += chunk
+        
+        message = buffer.split('\n')[0]
+        init_data = json.loads(message)
+        screenWidth = init_data['screen_width']
+        screenHeight = init_data['screen_height']
+        paddle = init_data['paddle']
+
+        errorLabel.config(text=f"Starting game as {paddle} paddle...")
+        errorLabel.update()
+
+        # Remoce timeout for game
+        client.settimeout(None)
+
+        # Close the join window and start game
+        app.withdraw()
+        playGame(screenWidth, screenHeight, paddle, client)
+        app.quit()
+    except ValueError:
+        errorLabel.config(text="Port must be a number")
+        errorLabel.update()
+    except socket.timeout:
+        errorLabel.config(text="Connectiong timeout - check IP/Port")
+        errorLabel.update()
+    except ConnectionRefusedError:
+        errorLabel.config(text="Connection refused - is server running?")
+        errorLabel.update()
+    except Exception as e:
+        errorLabel.config(text=f"Error: {str(e)}")
+        errorLabel.update()
+
+
 
 
 # This displays the opening screen, you don't need to edit this (but may if you like)
@@ -205,12 +354,14 @@ def startScreen():
     ipLabel.grid(column=0, row=1, sticky="W", padx=8)
 
     ipEntry = tk.Entry(app)
+    ipEntry.insert(0, "127.0.0.1") # Default localhost
     ipEntry.grid(column=1, row=1)
 
     portLabel = tk.Label(text="Server Port:")
     portLabel.grid(column=0, row=2, sticky="W", padx=8)
 
     portEntry = tk.Entry(app)
+    portEntry.insert(0, "55555") # Default port
     portEntry.grid(column=1, row=2)
 
     errorLabel = tk.Label(text="")
@@ -222,9 +373,9 @@ def startScreen():
     app.mainloop()
 
 if __name__ == "__main__":
-    #startScreen()
+    startScreen()
     
     # Uncomment the line below if you want to play the game without a server to see how it should work
     # the startScreen() function should call playGame with the arguments given to it by the server this is
     # here for demo purposes only
-    playGame(640, 480,"left",socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+    #playGame(640, 480,"left",socket.socket(socket.AF_INET, socket.SOCK_STREAM))
