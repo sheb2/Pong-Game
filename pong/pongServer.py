@@ -39,54 +39,56 @@ class Server:
             return True
         except:
             return False
-    
-    def receive_data(self, client):
-        buffer = ""
+               
+    def handle_client(self, client, player_id):
+        buffer = "" # Initialize buffer once per client so it persists
         while True:
             try:
+                # 1. Receive Data
                 chunk = client.recv(1024).decode('utf-8')
                 if not chunk:
-                    return None
-                buffer += chunk
-                if '\n' in buffer:
-                    message, buffer = buffer.split('\n', 1)
-                    return json.loads(message)
-            except:
-                return None
-            
-    def handle_client(self, client, player_id):
-        while True:
-            try:
-                data = self.receive_data(client)
-                if data is None:
                     break
-
-                with self.state_lock:
-                    if player_id == 1:
-                        self.game_state["p1_y"] = data.get("paddle_y", self.game_state["p1_y"])
-                    else:
-                        self.game_state["p2_y"] = data.get("paddle_y", self.game_state["p2_y"])
-
-                    if data.get("sync", 0) >= self.game_state["sync"]:
-                        self.game_state["ball_x"] = data.get("ball_x", self.game_state["ball_x"])
-                        self.game_state["ball_y"] = data.get("ball_y", self.game_state["ball_y"])
-                        self.game_state["ball_dx"] = data.get("ball_dx", self.game_state["ball_dx"])
-                        self.game_state["ball_dy"] = data.get("ball_dy", self.game_state["ball_dy"])
-                        self.game_state["score1"] = data.get("score1", self.game_state["score1"])
-                        self.game_state["score2"] = data.get("score2", self.game_state["score2"])
-                        self.game_state["sync"] = data["sync"]
                 
-                # send updated game state back
-                    response = self.game_state.copy()
-            
+                buffer += chunk
+
+                # 2. Process ALL complete messages currently in the buffer
+                while '\n' in buffer:
+                    message, buffer = buffer.split('\n', 1)
+                    
+                    try:
+                        data = json.loads(message)
+                    except json.JSONDecodeError:
+                        # If a message is corrupted, just skip it and keep going
+                        continue
+
+                    # 3. Update Game State
+                    with self.state_lock:
+                        if player_id == 1:
+                            self.game_state["p1_y"] = data.get("paddle_y", self.game_state["p1_y"])
+                        else:
+                            self.game_state["p2_y"] = data.get("paddle_y", self.game_state["p2_y"])
+
+                        # Sync logic: Only update ball/score if the client is "newer"
+                        if data.get("sync", 0) >= self.game_state["sync"]:
+                            self.game_state["ball_x"] = data.get("ball_x", self.game_state["ball_x"])
+                            self.game_state["ball_y"] = data.get("ball_y", self.game_state["ball_y"])
+                            self.game_state["ball_dx"] = data.get("ball_dx", self.game_state["ball_dx"])
+                            self.game_state["ball_dy"] = data.get("ball_dy", self.game_state["ball_dy"])
+                            self.game_state["score1"] = data.get("score1", self.game_state["score1"])
+                            self.game_state["score2"] = data.get("score2", self.game_state["score2"])
+                            self.game_state["sync"] = data["sync"]
+                
+                # 4. Send the updated state back to the client
+                response = self.game_state.copy()
                 if not self.send_data(client, response):
                     break   
 
             except Exception as e:
                 print(f"Error with player {player_id}: {e}")
                 break
+        
         print(f"Player {player_id} disconnected")
-        client.close()           
+        client.close()      
 
     def run(self):
         print(f"Server started on {self.host}:{self.port}")

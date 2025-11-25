@@ -1,9 +1,8 @@
 # =================================================================================================
-# Contributing Authors:	    <Anyone who touched the code>
-# Email Addresses:          <Your uky.edu email addresses>
-# Date:                     <The date the file was last edited>
-# Purpose:                  <How this file contributes to the project>
-# Misc:                     <Not Required.  Anything else you might want to include>
+# Contributing Authors:	    Shelby Scoville
+# Email Addresses:          snsc235@uky.edu
+# Date:                     11/25/25
+# Purpose:                  Client Logic
 # =================================================================================================
 
 import pygame
@@ -113,6 +112,8 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
     rScore = 0
 
     sync = 0
+    # Flag to track if we've done initial sync
+    initial_sync_done = False
 
     while True:
         # Wiping the screen
@@ -154,7 +155,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         
 
         if playerPaddleObj.moving == "down":
-            if playerPaddleObj.rect.bottomLeft[1] < screenHeight-10:
+            if playerPaddleObj.rect.bottomleft[1] < screenHeight-10:
                   playerPaddleObj.rect.y += playerPaddleObj.speed
         elif playerPaddleObj.moving == "up":
             if playerPaddleObj.rect.topleft[1] > 10:
@@ -169,15 +170,42 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                 else:
                     opponentPaddleObj.rect.y = received_state.get("p1_y", opponentPaddleObj.rect.y)
 
-                # If server is ahead or equal in sync, use server's ball position
-                if received_state.get("sync", 0) >= sync:
+                if playerPaddle == "right":
+                    # Always update ball and score from server to stay in sync
                     ball.rect.x = received_state.get("ball_x", ball.rect.x)
                     ball.rect.y = received_state.get("ball_y", ball.rect.y)
-                    ball.dx = received_state.get("ball_dx", ball.dx)
-                    ball.dy = received_state.get("ball_dy", ball.dy)
+                    ball.xVel = received_state.get("ball_dx", ball.xVel) # Ensure server sends snake_case or match keys
+                    ball.yVel = received_state.get("ball_dy", ball.yVel)
                     lScore = received_state.get("score1", lScore)
                     rScore = received_state.get("score2", rScore)
+                    
+                    # Snap our sync clock to the server's clock
                     sync = received_state.get("sync", sync)
+                # sync game state logic
+                #server_sync = received_state.get("sync", 0)
+
+                # for initial sync: if we haven't synced yet and server has data, use it
+                #if not initial_sync_done and server_sync > 0:
+                #    ball.rect.x = received_state.get("ball_x", ball.rect.x)
+                #    ball.rect.y = received_state.get("ball_y", ball.rect.y)
+                #    ball.xVel = received_state.get("ball_dx", ball.xVel)
+                #    ball.yVel = received_state.get("ball_dy", ball.yVel)
+                #    lScore = received_state.get("score1", lScore)
+                #    rScore = received_state.get("score2", rScore)
+                #    sync = server_sync
+                #    initial_sync_done = True
+                
+                # After initial sync: only update if server is ahead
+
+                # If server is ahead or equal in sync, use server's ball position
+                #if received_state.get("sync", 0) > sync:
+                #    ball.rect.x = received_state.get("ball_x", ball.rect.x)
+                #    ball.rect.y = received_state.get("ball_y", ball.rect.y)
+                #    ball.xVel = received_state.get("ball_dx", ball.xVel)
+                #    ball.yVel = received_state.get("ball_dy", ball.yVel)
+                #    lScore = received_state.get("score1", lScore)
+                #    rScore = received_state.get("score2", rScore)
+                #    sync = server_sync
 
 
         # If the game is over, display the win message
@@ -187,33 +215,35 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
             textRect = textSurface.get_rect()
             textRect.center = ((screenWidth/2), screenHeight/2)
             winMessage = screen.blit(textSurface, textRect)
+
         else:
 
             # ==== Ball Logic =====================================================================
             ball.updatePos()
 
             # If the ball makes it past the edge of the screen, update score, etc.
-            if ball.rect.x > screenWidth:
-                lScore += 1
-                pointSound.play()
-                ball.reset(nowGoing="left")
-            elif ball.rect.x < 0:
-                rScore += 1
-                pointSound.play()
-                ball.reset(nowGoing="right")
+            if playerPaddle == "left":
+                if ball.rect.x > screenWidth:
+                    lScore += 1
+                    pointSound.play()
+                    ball.reset(nowGoing="left")
+                elif ball.rect.x < 0:
+                    rScore += 1
+                    pointSound.play()
+                    ball.reset(nowGoing="right")
                 
-            # If the ball hits a paddle
-            if ball.rect.colliderect(playerPaddleObj.rect):
-                bounceSound.play()
-                ball.hitPaddle(playerPaddleObj.rect.center[1])
-            elif ball.rect.colliderect(opponentPaddleObj.rect):
-                bounceSound.play()
-                ball.hitPaddle(opponentPaddleObj.rect.center[1])
+                # If the ball hits a paddle
+                if ball.rect.colliderect(playerPaddleObj.rect):
+                    bounceSound.play()
+                    ball.hitPaddle(playerPaddleObj.rect.center[1])
+                elif ball.rect.colliderect(opponentPaddleObj.rect):
+                    bounceSound.play()
+                    ball.hitPaddle(opponentPaddleObj.rect.center[1])
                 
-            # If the ball hits a wall
-            if ball.rect.colliderect(topWall) or ball.rect.colliderect(bottomWall):
-                bounceSound.play()
-                ball.hitWall()
+                # If the ball hits a wall
+                if ball.rect.colliderect(topWall) or ball.rect.colliderect(bottomWall):
+                    bounceSound.play()
+                    ball.hitWall()
             
             pygame.draw.rect(screen, WHITE, ball)
             # ==== End Ball Logic =================================================================
@@ -239,18 +269,19 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # =========================================================================================
         # Send your server update here at the end of the game loop to sync your game with your
         # opponent's game
+     
+        # =========================================================================================
         send_update(
             client,
             playerPaddleObj.rect.y,
+            ball.rect.x,
             ball.rect.y,
-            ball.dx,
-            ball.dy,
+            ball.xVel,
+            ball.yVel,
             lScore,
             rScore,
             sync
         )
-        # =========================================================================================
-
 
 
 
