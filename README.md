@@ -36,6 +36,7 @@ Run the following line to install the required libraries for this project:
 Known Bugs
 ==========
 - The game begins immediately when the first client connects, before the second player joins. This means Player 1 sees the game running while Player 2 is still connecting.
-- Abrupt disconnectin handling, if one client disconnects mid-game the other client continues running without notification. If Player 1 disconnects the game will be frozen for Player 2.
+- Abrupt disconnection handling, if one client disconnects mid-game the other client continues running without notification. If Player 1 disconnects the game will be frozen for Player 2.
+
 
 
