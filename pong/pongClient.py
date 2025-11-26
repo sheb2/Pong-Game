@@ -1,7 +1,7 @@
 # =================================================================================================
 # Contributing Authors:	    Shelby Scoville
 # Email Addresses:          snsc235@uky.edu
-# Date:                     11/25/25
+# Date:                     11/26/25
 # Purpose:                  Client Logic for Pong Game
 # =================================================================================================
 
@@ -24,23 +24,35 @@ state_lock = threading.Lock()
 # Post:     Global 'received_state' is updated with latest server data
 def receive_updates(client: socket.socket) -> None:
     global received_state
+    # buffer is a temporary string to hold incoming data chunks
     buffer = ""
+    # Infinite loop to constantly listen for messages
     while True:
         try: 
+            # Receive raw bytes from the server (up to 1024 bytes at a time)
+            # decoding them converts the raw bytes into a readable string
             chunk = client.recv(1024).decode('utf-8')
+            # If we receive an empty chunk, it means the server closed the connection 
             if not chunk: 
                 break
-
+            
+            # Add the new piece of data to our buffer
             buffer += chunk
 
             # process all complete messages in buffer
+            # We use '\n' to know where one message ends and the next begins
             while '\n' in buffer:
+                # Split the buffer into [message, rest of buffer]
                 message, buffer = buffer.split('\n', 1)
                 try:
+                    # Convert the string message (JSON) back into a Python dictionary
                     data = json.loads(message)
+                    # Use the lock to safely update the global variable
                     with state_lock:
                         received_state = data
+
                 except json.JSONDecodeError:
+                    # If a message is malformed, just skip it
                     continue
         except Exception as e:
             print(f"Error receiving data: {e}")
@@ -52,6 +64,7 @@ def receive_updates(client: socket.socket) -> None:
 # Post:     JSON data is sent over the socket
 def send_update(client: socket.socket, paddle_y: int, ball_x: int, ball_y: int, ball_dx: int, ball_dy: int, score1: int, score2: int, sync: int) -> bool:
     try:
+        # Create a dictionary containing all the info we want to share
         data = {
             "paddle_y": paddle_y,
             "ball_x": ball_x,
@@ -62,7 +75,11 @@ def send_update(client: socket.socket, paddle_y: int, ball_x: int, ball_y: int, 
             "score2": score2,
             "sync": sync
         }
+
+        # Convert dictionary to a JSON string and add a newline character '\n' 
+        # The newline is crucial so the server knows when the message ends
         message = json.dumps(data) + '\n'
+        # Send the encoded bytes to the server
         client.sendall(message.encode('utf-8'))
         return True
     except Exception as e:
@@ -76,7 +93,7 @@ def send_update(client: socket.socket, paddle_y: int, ball_x: int, ball_y: int, 
 def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket) -> None:
     global received_state
 
-    # Start backgroung thread to receive updates
+    # Start backgroung thread to receive updates from the server
     receive_thread = threading.Thread(target=receive_updates, args=(client,), daemon=True)
     receive_thread.start()
     
@@ -174,7 +191,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                     sync = received_state.get("sync", sync)
 
         # If the game is over, display the win message
-        if lScore > 4 or rScore > 4:
+        if lScore > 10 or rScore > 10:
             winText = "Player 1 Wins! " if lScore > 4 else "Player 2 Wins! "
             textSurface = winFont.render(winText, False, WHITE, (0,0,0))
             textRect = textSurface.get_rect()
@@ -255,13 +272,14 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
             errorLabel.update()
             return
         
-        # Create socket and connect
+        # Create socket and connect, set a 5-second timeout so the program doesn't freeze if the IP is wrong
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.settimeout(5)
 
         errorLabel.config(text=f"Connecting to {ip}:{port}...")
         errorLabel.update()
 
+        # Attempt to connect
         client.connect((ip, int(port)))
 
         errorLabel.config(text="Connected! Waiting for game info...")
@@ -277,6 +295,7 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
         
         message = buffer.split('\n')[0]
         init_data = json.loads(message)
+        # Extract settings
         screenWidth = init_data['screen_width']
         screenHeight = init_data['screen_height']
         paddle = init_data['paddle']
@@ -284,7 +303,7 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
         errorLabel.config(text=f"Starting game as {paddle} paddle...")
         errorLabel.update()
 
-        # Remoce timeout for game
+        # Remove timeout for game
         client.settimeout(None)
 
         # Close the join window and start game
@@ -295,7 +314,7 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
         errorLabel.config(text="Port must be a number")
         errorLabel.update()
     except socket.timeout:
-        errorLabel.config(text="Connectiong timeout - check IP/Port")
+        errorLabel.config(text="Connection timeout - check IP/Port")
         errorLabel.update()
     except ConnectionRefusedError:
         errorLabel.config(text="Connection refused - is server running?")

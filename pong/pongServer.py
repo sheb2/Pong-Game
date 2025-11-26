@@ -1,7 +1,7 @@
 # =================================================================================================
 # Contributing Authors:	    Shelby Scoville
 # Email Addresses:          snsc235@uky.edu
-# Date:                     11/25/2025
+# Date:                     11/26/2025
 # Purpose:                  Server Logic for Pong Game                     
 # =================================================================================================
 
@@ -17,12 +17,20 @@ class Server:
     def __init__(self, host: str ='0.0.0.0', port: int =55555) -> None:
         self.host = host
         self.port = port
+        # Create a TCP socket
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Bind the socket to the address and port
         self.server.bind((self.host, self.port))
+        # Start listening for incoming connections
         self.server.listen()
 
+        # List to stor connected client sockets
         self.clients = []
+        # Lock to prevent data corruption
         self.state_lock = threading.Lock()
+
+        # The master game state
+        # This dictionary hold the official truth of where everything is
         self.game_state = {
             "ball_x": 320,
             "ball_y": 240,
@@ -41,10 +49,13 @@ class Server:
     # Post:     Data is sent encoded as bytes
     def send_data(self, client: socket.socket, data: dict) -> bool:
         try:
+            # Convert dictionary to JSON string and add newline delimiter
             message = json.dumps(data) + '\n'
+            # Send data over the network
             client.sendall(message.encode('utf-8'))
             return True
         except:
+            # If sending fails (client disconnected), return False
             return False
 
     # Author:   Shelby Scoville
@@ -52,12 +63,16 @@ class Server:
     # Pre:      Client is connected and identified by player_id
     # Post:     Client loop ends upon disconnection
     def handle_client(self, client: socket.socket, player_id: int) -> None:
+        # buffer to store partial messages
         buffer = "" 
+
+        # Loop forever while client is connected
         while True:
             try:
                 # 1. Receive Data
                 chunk = client.recv(1024).decode('utf-8')
                 if not chunk:
+                    # Connection closed by client
                     break
                 
                 buffer += chunk
@@ -74,12 +89,14 @@ class Server:
 
                     # 3. Update Game State
                     with self.state_lock:
+                        # Update the specific paddle position for this player
                         if player_id == 1:
                             self.game_state["p1_y"] = data.get("paddle_y", self.game_state["p1_y"])
                         else:
                             self.game_state["p2_y"] = data.get("paddle_y", self.game_state["p2_y"])
 
                         # Sync logic: Only update ball/score if the client is "newer"
+                        # This prevents an old message from overwriting a newer one.
                         if data.get("sync", 0) >= self.game_state["sync"]:
                             self.game_state["ball_x"] = data.get("ball_x", self.game_state["ball_x"])
                             self.game_state["ball_y"] = data.get("ball_y", self.game_state["ball_y"])
@@ -108,12 +125,17 @@ class Server:
     def run(self) -> None:
         print(f"Server started on {self.host}:{self.port}")
         print("Waiting for 2 players...")
+
+        # Wait until we have 2 players
         while len(self.clients) < 2:
+            # .accept() pauses the program until a client connects
             c, addr = self.server.accept()
             player_id = len(self.clients) + 1
             self.clients.append(c)
             
+            # Assign paddle: Player 1 is Left, Player 2 is Right
             paddle = "left" if player_id == 1 else "right"
+            # Send initial configuration to the client
             init_data = {
                 'screen_width': 640,
                 'screen_height': 480,
@@ -123,11 +145,13 @@ class Server:
 
             print(f"Player {player_id} connected from {addr} as {paddle} paddle")
 
+        # Start a new thread for each client so they can talk to the server simultanueously
         threading.Thread(target=self.handle_client, args=(self.clients[0], 1), daemon=True).start()
         threading.Thread(target=self.handle_client, args=(self.clients[1], 2), daemon=True).start()
 
         print("Both players connected! Game starting...")
 
+        # Keep the main thread alive to allow background threads to run
         try: 
             while True:
                 pass
